@@ -1,0 +1,5 @@
+{
+  "name": "Property Calculator (reactType)",
+  "description": "A simple and interactive tool to calculate land value based on size in square meters or square feet and price per square foot. All fields are editable, and changes are reflected instantly across the calculator.",
+  "requestFramePermissions": []
+}

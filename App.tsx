@@ -1,0 +1,340 @@
+
+import React, { useState, useCallback, useEffect } from 'react';
+import InputField from './components/InputField';
+
+const CONVERSION_FACTOR = 10.764;
+
+interface CalculationRecord {
+  id: string;
+  sqm: string;
+  sqft: string;
+  pricePerSqft: string;
+  totalValue: string;
+  timestamp: number;
+}
+
+// Defined outside the component to avoid recreation on every render
+const createRecord = (
+  s: string, 
+  sf: string, 
+  p: string, 
+  t: string
+): CalculationRecord | null => {
+  if (!s || !sf || !p || !t) return null;
+  return {
+    id: Date.now().toString() + Math.random().toString(36).slice(2),
+    sqm: s,
+    sqft: sf,
+    pricePerSqft: p,
+    totalValue: t,
+    timestamp: Date.now(),
+  };
+};
+
+const App: React.FC = () => {
+  const [sqm, setSqm] = useState<string>('1000');
+  const [sqft, setSqft] = useState<string>((1000 * CONVERSION_FACTOR).toFixed(3));
+  const [pricePerSqft, setPricePerSqft] = useState<string>('50');
+  const [totalValue, setTotalValue] = useState<string>('');
+
+  // History and Bookmarks State
+  const [history, setHistory] = useState<CalculationRecord[]>([]);
+  const [bookmarks, setBookmarks] = useState<CalculationRecord[]>([]);
+  const [activeTab, setActiveTab] = useState<'history' | 'bookmarks'>('history');
+
+  // Define handlers early to use in useEffect
+  const addToHistory = useCallback((record: CalculationRecord) => {
+    setHistory(prev => {
+      // Anti-flood: Check if identical to the most recent record
+      if (prev.length > 0) {
+        const last = prev[0];
+        if (
+          last.sqm === record.sqm && 
+          last.sqft === record.sqft && 
+          last.pricePerSqft === record.pricePerSqft && 
+          last.totalValue === record.totalValue
+        ) {
+          return prev;
+        }
+      }
+      const newHistory = [record, ...prev];
+      return newHistory.slice(0, 10); // Keep only last 10
+    });
+    setActiveTab('history');
+  }, []);
+
+  const handleCalculateInternal = useCallback((s: string, sf: string, p: string, shouldSave: boolean) => {
+    const sqftNum = parseFloat(sf);
+    const priceNum = parseFloat(p);
+    
+    if (!isNaN(sqftNum) && !isNaN(priceNum)) {
+      const newTotal = (sqftNum * priceNum).toFixed(3);
+      setTotalValue(newTotal);
+      
+      if (shouldSave) {
+        const record = createRecord(s, sf, p, newTotal);
+        if (record) addToHistory(record);
+      }
+    }
+  }, [addToHistory]);
+
+  // Load bookmarks and set initial value
+  useEffect(() => {
+    const saved = localStorage.getItem('land_calc_bookmarks');
+    if (saved) {
+      try {
+        setBookmarks(JSON.parse(saved));
+      } catch (error) {
+        console.error("Failed to parse bookmarks", error);
+      }
+    }
+    // Initial calculation for the default values
+    handleCalculateInternal('1000', (1000 * CONVERSION_FACTOR).toFixed(3), '50', false);
+  }, [handleCalculateInternal]);
+
+  // Save bookmarks to LocalStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem('land_calc_bookmarks', JSON.stringify(bookmarks));
+  }, [bookmarks]);
+
+  const handleSqmChange = useCallback((value: string) => {
+    setSqm(value);
+    const numValue = parseFloat(value);
+    if (!isNaN(numValue) && value.trim() !== '') {
+      const newSqft = numValue * CONVERSION_FACTOR;
+      setSqft(newSqft.toFixed(3));
+      setTotalValue('');
+    } else {
+      setSqft('');
+      setTotalValue('');
+    }
+  }, []);
+
+  const handleSqftChange = useCallback((value: string) => {
+    setSqft(value);
+    const numValue = parseFloat(value);
+    if (!isNaN(numValue) && value.trim() !== '') {
+      const newSqm = numValue / CONVERSION_FACTOR;
+      setSqm(newSqm.toFixed(3));
+      setTotalValue('');
+    } else {
+      setSqm('');
+      setTotalValue('');
+    }
+  }, []);
+
+  const handlePriceChange = useCallback((value: string) => {
+    setPricePerSqft(value);
+    setTotalValue('');
+  }, []);
+  
+  const handleTotalValueChange = useCallback((value: string) => {
+    setTotalValue(value);
+    const numValue = parseFloat(value);
+    const sqftNum = parseFloat(sqft);
+    
+    if (!isNaN(numValue) && !isNaN(sqftNum) && sqftNum > 0) {
+      setPricePerSqft((numValue / sqftNum).toFixed(3));
+    }
+  }, [sqft]);
+
+  const formatCurrency = (value: string): string => {
+    const num = parseFloat(value);
+    if (isNaN(num)) return value;
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 3,
+      maximumFractionDigits: 3,
+    }).format(num);
+  };
+
+  const addToBookmarks = () => {
+    if (bookmarks.length >= 7) {
+      alert("You can only have up to 7 bookmarks. Please remove one to add another.");
+      return;
+    }
+    const record = createRecord(sqm, sqft, pricePerSqft, totalValue);
+    if (!record) return;
+
+    setBookmarks(prev => [record, ...prev]);
+    setActiveTab('bookmarks');
+  };
+
+  const loadRecord = (record: CalculationRecord) => {
+    setSqm(record.sqm);
+    setSqft(record.sqft);
+    setPricePerSqft(record.pricePerSqft);
+    setTotalValue(record.totalValue);
+  };
+
+  const removeBookmark = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    setBookmarks(prev => prev.filter(b => b.id !== id));
+  };
+
+  const onCalculateClick = () => {
+    handleCalculateInternal(sqm, sqft, pricePerSqft, true);
+  };
+
+  return (
+    <div className="bg-gray-900 min-h-screen flex flex-col items-center p-4 font-sans py-12">
+      <div className="w-full max-w-md bg-gray-800 rounded-2xl shadow-lg border border-gray-700 overflow-hidden">
+        <div className="p-6 space-y-4">
+          <header>
+            <h1 className="text-2xl md:text-3xl font-bold text-white text-center">Land Value Calculator</h1>
+            <p className="text-center text-gray-400 mt-2 text-sm">Instantly convert and calculate land values.</p>
+          </header>
+
+          <div className="space-y-4 pt-2">
+            <InputField
+              id="sqm"
+              label="Land Size (sqm)"
+              value={sqm}
+              onChange={handleSqmChange}
+              unit="sqm"
+              placeholder="e.g., 1000"
+            />
+            <InputField
+              id="sqft"
+              label="Land Size (sqft)"
+              value={sqft}
+              onChange={handleSqftChange}
+              unit="sqft"
+              placeholder="e.g., 10764.0"
+            />
+            <InputField
+              id="price"
+              label="Land Price (per sqft)"
+              value={pricePerSqft}
+              onChange={handlePriceChange}
+              unit="per sqft"
+              prefix="$"
+              placeholder="e.g., 50"
+            />
+            
+            <div className="!my-5 border-t border-gray-700"></div>
+            
+            <InputField
+              id="total"
+              label="Total Land Value"
+              value={totalValue}
+              onChange={handleTotalValueChange}
+              isResult={true}
+              displayValue={formatCurrency(totalValue)}
+              placeholder="Click Calculate..."
+            />
+
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <button 
+                onClick={onCalculateClick}
+                className="flex items-center justify-center gap-2 px-3 py-2.5 bg-green-600 hover:bg-green-500 text-white rounded-lg transition-colors font-medium text-sm active:scale-95 transform"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="4" y="2" width="16" height="20" rx="2" ry="2"></rect>
+                  <line x1="8" y1="6" x2="16" y2="6"></line>
+                  <line x1="16" y1="14" x2="16" y2="14"></line>
+                  <line x1="12" y1="14" x2="12" y2="14"></line>
+                  <line x1="8" y1="14" x2="8" y2="14"></line>
+                  <line x1="16" y1="18" x2="16" y2="18"></line>
+                  <line x1="12" y1="18" x2="12" y2="18"></line>
+                  <line x1="8" y1="18" x2="8" y2="18"></line>
+                </svg>
+                Calculate
+              </button>
+              <button 
+                onClick={addToBookmarks}
+                className="flex items-center justify-center gap-2 px-3 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors font-medium text-sm active:scale-95 transform"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/>
+                </svg>
+                Bookmark
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <div className="border-t border-gray-700 bg-gray-800/50">
+          <div className="flex">
+            <button
+              onClick={() => setActiveTab('history')}
+              className={`flex-1 py-3 text-sm font-medium text-center transition-colors relative ${
+                activeTab === 'history' ? 'text-blue-400' : 'text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              History ({history.length})
+              {activeTab === 'history' && (
+                <div className="absolute bottom-0 left-0 w-full h-0.5 bg-blue-500"></div>
+              )}
+            </button>
+            <button
+              onClick={() => setActiveTab('bookmarks')}
+              className={`flex-1 py-3 text-sm font-medium text-center transition-colors relative ${
+                activeTab === 'bookmarks' ? 'text-blue-400' : 'text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              Bookmarks ({bookmarks.length}/7)
+              {activeTab === 'bookmarks' && (
+                <div className="absolute bottom-0 left-0 w-full h-0.5 bg-blue-500"></div>
+              )}
+            </button>
+          </div>
+
+          <div className="bg-gray-900/30 min-h-[200px] max-h-[300px] overflow-y-auto p-4">
+            {activeTab === 'history' && history.length === 0 && (
+              <div className="text-center text-gray-500 py-8 text-sm">
+                No calculations saved yet.
+              </div>
+            )}
+            
+            {activeTab === 'bookmarks' && bookmarks.length === 0 && (
+              <div className="text-center text-gray-500 py-8 text-sm">
+                No bookmarks saved yet.
+              </div>
+            )}
+
+            <div className="space-y-2">
+              {(activeTab === 'history' ? history : bookmarks).map((item) => (
+                <div 
+                  key={item.id}
+                  onClick={() => loadRecord(item)}
+                  className="group relative p-3 bg-gray-800 rounded-lg border border-gray-700 hover:border-blue-500/50 hover:bg-gray-750 cursor-pointer transition-all"
+                >
+                  <div className="flex justify-between items-start">
+                    <div className="text-sm text-gray-300">
+                      <span className="font-bold text-white">{formatCurrency(item.totalValue)}</span>
+                    </div>
+                    <div className="text-xs text-gray-500 tabular-nums">
+                      {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </div>
+                  </div>
+                  <div className="mt-1 text-xs text-gray-400">
+                    {parseFloat(item.sqm).toLocaleString()} sqm @ {formatCurrency(item.pricePerSqft)}/sqft
+                  </div>
+                  
+                  {activeTab === 'bookmarks' && (
+                    <button
+                      onClick={(e) => removeBookmark(e, item.id)}
+                      className="absolute top-2 right-2 p-1.5 text-gray-500 hover:text-red-400 hover:bg-gray-700 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                      aria-label="Remove bookmark"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M3 6h18"></path>
+                        <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
+                        <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
+                      </svg>
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default App;
